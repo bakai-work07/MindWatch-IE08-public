@@ -1,121 +1,72 @@
-# MindWatch ML
+# MindWatch V2 — Personalized Stress Estimation
 
-MindWatch predicts a user's next-day self-reported stress level on a 0–100 scale using a multimodal machine learning model。
+## Overview
 
-## Models
+MindWatch V2 estimates a user's same-day subjective stress level (0–100) from physiological measurements using Personalized Ridge Regression.
 
-MindWatch provides two complementary machine learning models for stress monitoring and prediction.
+The system is designed for individual calibration rather than universal prediction.
 
-### 1. Next-Day Stress Prediction Model
+## Model
 
-The prediction model predicts the user's next-day self-reported stress level (0–100) when the current self-reported stress value is available. The model uses median imputation for missing measurements followed by Linear Regression.
+- Algorithm: Ridge Regression (`alpha=100`)
+- Preprocessing: Median Imputation → StandardScaler → Ridge
+- Training target: Same-day self-reported stress (`stress`)
+- Output: Estimated same-day stress score (0–100)
 
-six features:
-- Current self-reported stress
-- Participant historical mean stress
-- Daily steps
-- Overall sleep score
-- Deep sleep duration
-- HRV (RMSSD)
+### Input Features
 
-performance on the time-based test set:
-- MAE: 15.483
-- RMSE: 21.498
-- R²: 0.264
+| Feature | Description |
+|---|---|
+| `avg_rmssd` | Current-day HRV |
+| `overall_score` | Current-day sleep quality score |
+| `daily_steps` | Current-day step count |
+| `avg_rmssd_dev` | Current-day HRV minus the mean of preceding available HRV measurements |
 
-stored at: `models/stress_predictor_multimodal_v1.joblib`
+Self-reported stress is used **only as a training label**, never as an inference feature. Anxiety scores are not used.
 
-### 2. Current Stress Monitoring Model
+## Personal Calibration
 
-The monitoring model estimates the user's current stress level (0–100) without requiring the current self-reported stress value as an input. The model uses median imputation for missing measurements followed by Linear Regression.
+MindWatch requires personal calibration before producing individualized estimates.
 
-five features:
-- Participant historical mean stress
-- Daily steps
-- Overall sleep score
-- Deep sleep duration
-- HRV (RMSSD)
+- Fewer than 30 valid records: Collect calibration data.
+- 30–59 valid records: Initial personalized model available.
+- 60 or more valid records: Recommended calibration threshold reached.
 
-performance on the time-based test set:
-- MAE: 16.789
-- RMSE: 22.126
-- R²: 0.237
+A valid calibration record includes a same-day stress label and at least one physiological measurement. The training pipeline handles missing individual features when sufficient observations are available.
 
-stored at: `models/stress_monitoring_multimodal_v1.joblib`
+The 30/60-record thresholds are engineering choices, not experimentally established optimal calibration periods.
 
-## Model Roles
+## Model Usage
 
-| Model | Current Self-Report Required | Purpose | Output |
-|---|---|---|---|
-| Next-Day Stress Prediction | Yes | Stress forecasting | Next-day stress (0–100) |
-| Current Stress Monitoring | No | Passive monitoring | Current stress (0–100) |
+The ML module provides:
 
-## App Integration
+- `calibration_status(history)`
+- `train_personalized_model(history, template=None)`
+- `estimate_stress(trained_user, avg_rmssd, overall_score, daily_steps, hrv_history)`
+- `save_personal_model(trained_user, path)`
+- `load_personal_model(path)`
+- `load_shared_template(path)`
 
-MindWatch provides two independent model interfaces. The application team can select either model depending on the intended application design.
+`mindwatch_v2.joblib` stores the shared model template. Each user must calibrate their own model, and the resulting personal parameters must be retained separately.
 
-### 1. Next-Day Stress Prediction
+## Evaluation Results
 
-Use `src/predict.py` to predict the user's next-day stress level when the current self-reported stress value is available.
+Personalized Ridge, evaluated on 14 eligible participants using chronological train/test splits:
 
-test example:
-```python
-from src.predict import predict_from_user_history
-prediction = predict_from_user_history(
-    current_stress=60,
-    stress_history=[35, 50, 42, 38, 55],
-    daily_steps=8000,
-    overall_score=80,
-    deep_sleep_in_minutes=70,
-    avg_rmssd=45
-)
-print(prediction)
-```
+| Metric | Result |
+|---|---:|
+| Mean participant MAE | 17.243 |
+| Personal mean baseline MAE | 17.547 |
+| Participants outperforming baseline | 9/14 |
 
-The function returns the predicted next-day stress level as a float between 0 and 100.
+## Limitations
 
-`stress_history` should contain only stress scores recorded before the current day. Wearable parameters may be set to `None` when unavailable.
+Due to the personalized training model, developers should pay particular attention to the calibration and model integration process. Each user requires an individual Ridge Regression model trained on their own historical physiological measurements and corresponding self-reported stress labels. Developers must ensure that user data and model parameters are properly separated and that self-reported stress scores are used strictly as training labels rather than inference inputs.
 
-### 2. Current Stress Monitoring
+The observed relationships between physiological indicators (HRV, sleep quality, and daily steps) and subjective stress levels are relatively weak and vary considerably across individuals.The model can only provide approximate stress estimatesgeneral trends.
 
-Use `src/monitor.py` to estimate the user's current stress level.
+## Integration Responsibilities
 
-test example:
-```python
-from src.monitor import estimate_from_user_history
-stress_estimate = estimate_from_user_history(
-    stress_history=[35, 50, 42, 38, 55],
-    daily_steps=8000,
-    overall_score=80,
-    deep_sleep_in_minutes=70,
-    avg_rmssd=45
-)
-print(stress_estimate)
-```
+The ML module handles feature preparation, personal calibration, estimation, and model serialization.
 
-The function returns the estimated current stress level as a float between 0 and 100.
-
-`stress_history` should contain previous self-reported stress scores. Wearable parameters may be set to `None` when unavailable.
-
-An empty stress history can also be provided for a new user. In this case, the missing historical stress feature is handled by the model's imputation pipeline.
-
-## Project Structure
-
-```text
-MindWatch-ML/
-    data/
-        processed/
-            daily_model_v1.csv
-    notebooks/
-        04_final_multimodal_model.ipynb
-        05_current_stress_monitoring.ipynb
-    models/
-        stress_predictor_multimodal_v1.joblib
-        stress_monitoring_multimodal_v1.joblib
-    src/
-        predict.py
-        monitor.py
-    requirements.txt
-    .gitignore
-    README.md
-```
+The application/backend provides physiological records, optional calibration labels, user-specific history, and persistent storage. It does not need to implement Ridge training or calculate ML features itself.

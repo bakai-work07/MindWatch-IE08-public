@@ -32,7 +32,7 @@ MIN_HRV_HISTORY = 7
 # Google Fitness / Fitbit OAuth Configuration
 # ---------------------------------------------------------------------------
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "352416690429-k7lrpgminhnbomsr3p0ccngonlj35j5s.apps.googleusercontent.com")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "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")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("FITBIT_REDIRECT_URI", "https://mindwatch-ie08.onrender.com/api/fitbit/callback")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://mindwatch-frontend.onrender.com")
 
@@ -53,6 +53,14 @@ live_fitbit_cache = {
     "body_load": 22.0,
     "status": "disconnected",
 }
+
+
+def require_google_secret():
+    if not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Google OAuth is not configured. Set the GOOGLE_CLIENT_SECRET environment variable.",
+        )
 
 
 def comparison(estimate, reported):
@@ -438,6 +446,7 @@ def create_app(model_path=None, state_path=None):
     @app.get("/api/fitbit/login")
     def fitbit_login():
         """Initiates the Google Fitness OAuth 2.0 handshake."""
+        require_google_secret()
         oauth = OAuth2Session(GOOGLE_CLIENT_ID, redirect_uri=REDIRECT_URI, scope=SCOPES)
         authorization_url, _ = oauth.authorization_url(
             AUTH_URL, 
@@ -449,6 +458,7 @@ def create_app(model_path=None, state_path=None):
     @app.get("/api/fitbit/callback")
     def fitbit_callback(code: str):
         """Swaps code for access token upon user approval."""
+        require_google_secret()
         payload = {
             "client_id": GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
